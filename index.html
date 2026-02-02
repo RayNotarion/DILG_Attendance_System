@@ -69,6 +69,14 @@
             box-shadow: 0 10px 20px rgba(245, 158, 11, 0.4);
         }
         
+        .gradient-green {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        }
+        
+        .gradient-green:hover {
+            box-shadow: 0 10px 20px rgba(16, 185, 129, 0.4);
+        }
+        
         .table-row-hover {
             transition: all 0.2s ease;
         }
@@ -137,7 +145,7 @@
         // Import Firebase modules
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
-        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, serverTimestamp, updateDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
@@ -258,10 +266,21 @@ const firebaseConfig = {
             }
         };
 
-        // Open modal
+        // Open modal and set current time for Time In
         window.openModal = () => {
             const modal = document.getElementById('attendanceModal');
             modal.classList.remove('hidden');
+            
+            // Auto-fill current time for Time In
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('timeIn').value = `${hours}:${minutes}`;
+            
+            // Auto-set AM/PM based on current time
+            const hour = now.getHours();
+            document.getElementById('amPm').value = hour < 12 ? 'AM' : 'PM';
+            
             setTimeout(() => {
                 modal.querySelector('.glass-effect').classList.add('scale-in');
             }, 10);
@@ -273,7 +292,7 @@ const firebaseConfig = {
             document.getElementById('attendanceForm').reset();
         };
 
-        // Add attendance
+        // Add attendance (Time In only)
         window.addAttendance = async (event) => {
             event.preventDefault();
             
@@ -289,7 +308,6 @@ const firebaseConfig = {
             
             const name = document.getElementById('name').value;
             const timeIn = document.getElementById('timeIn').value;
-            const timeOut = document.getElementById('timeOut').value;
             const amPm = document.getElementById('amPm').value;
             const submitBtn = event.target.querySelector('button[type="submit"]');
             
@@ -301,7 +319,7 @@ const firebaseConfig = {
                 await addDoc(collection(db, 'attendance'), {
                     name: name,
                     timeIn: timeIn,
-                    timeOut: timeOut,
+                    timeOut: null, // Time Out will be added later
                     amPm: amPm,
                     uid: currentUser.uid,
                     timestamp: serverTimestamp(),
@@ -310,7 +328,7 @@ const firebaseConfig = {
 
                 await Swal.fire({
                     icon: 'success',
-                    title: 'Record Added!',
+                    title: 'Time In Recorded!',
                     text: 'Attendance record has been added successfully',
                     timer: 2000,
                     timerProgressBar: true,
@@ -330,6 +348,51 @@ const firebaseConfig = {
                 // Always reset the button state
                 submitBtn.disabled = false;
                 submitBtn.innerHTML = originalButtonHTML;
+            }
+        };
+
+        // Add Time Out function
+        window.addTimeOut = async (id) => {
+            const result = await Swal.fire({
+                title: 'Clock Out?',
+                text: "Record your time out now?",
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#10b981',
+                cancelButtonColor: '#6b7280',
+                confirmButtonText: 'Yes, Clock Out',
+                cancelButtonText: 'Cancel'
+            });
+
+            if (result.isConfirmed) {
+                try {
+                    const now = new Date();
+                    const hours = String(now.getHours()).padStart(2, '0');
+                    const minutes = String(now.getMinutes()).padStart(2, '0');
+                    const timeOut = `${hours}:${minutes}`;
+
+                    await updateDoc(doc(db, 'attendance', id), {
+                        timeOut: timeOut
+                    });
+
+                    await Swal.fire({
+                        icon: 'success',
+                        title: 'Time Out Recorded!',
+                        text: `Clocked out at ${timeOut}`,
+                        timer: 2000,
+                        timerProgressBar: true,
+                        showConfirmButton: false
+                    });
+
+                    loadAttendanceRecords();
+                } catch (error) {
+                    await Swal.fire({
+                        icon: 'error',
+                        title: 'Error',
+                        text: 'Failed to record time out: ' + error.message,
+                        confirmButtonColor: '#dc2626'
+                    });
+                }
             }
         };
 
@@ -439,6 +502,10 @@ const firebaseConfig = {
                 const row = document.createElement('tr');
                 row.className = 'border-b table-row-hover slide-in';
                 row.style.animationDelay = `${index * 0.05}s`;
+                
+                // Check if time out is already recorded
+                const hasTimeOut = record.timeOut && record.timeOut !== null;
+                
                 row.innerHTML = `
                     <td class="px-6 py-4">
                         <div class="flex items-center">
@@ -465,12 +532,17 @@ const firebaseConfig = {
                         </span>
                     </td>
                     <td class="px-6 py-4">
-                        <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-100 text-red-800">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            ${record.timeOut || '-'}
-                        </span>
+                        ${hasTimeOut 
+                            ? `<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-red-100 text-red-800">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                ${record.timeOut}
+                            </span>`
+                            : `<span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-semibold bg-gray-100 text-gray-600">
+                                Not clocked out
+                            </span>`
+                        }
                     </td>
                     <td class="px-6 py-4">
                         <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-bold ${record.amPm === 'AM' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">
@@ -478,13 +550,25 @@ const firebaseConfig = {
                         </span>
                     </td>
                     <td class="px-6 py-4">
-                        <button onclick="deleteRecord('${record.id}')" 
-                                class="inline-flex items-center bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-4 py-2 rounded-lg transition duration-200 transform hover:scale-105 font-semibold shadow-md">
-                            <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                            </svg>
-                            Delete
-                        </button>
+                        <div class="flex gap-2">
+                            ${!hasTimeOut 
+                                ? `<button onclick="addTimeOut('${record.id}')" 
+                                        class="inline-flex items-center bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white px-4 py-2 rounded-lg transition duration-200 transform hover:scale-105 font-semibold shadow-md">
+                                    <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    Time Out
+                                </button>`
+                                : ''
+                            }
+                            <button onclick="deleteRecord('${record.id}')" 
+                                    class="inline-flex items-center bg-gradient-to-r from-red-600 to-red-700 hover:from-red-700 hover:to-red-800 text-white px-4 py-2 rounded-lg transition duration-200 transform hover:scale-105 font-semibold shadow-md">
+                                <svg class="w-4 h-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                                Delete
+                            </button>
+                        </div>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -562,18 +646,6 @@ const firebaseConfig = {
             }
 
             loadAttendanceRecords();
-        };
-
-        // Set current time
-        window.setCurrentTime = (inputId) => {
-            const now = new Date();
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            document.getElementById(inputId).value = `${hours}:${minutes}`;
-            
-            // Auto-set AM/PM based on time
-            const hour = now.getHours();
-            document.getElementById('amPm').value = hour < 12 ? 'AM' : 'PM';
         };
 
         // Close modal on outside click
@@ -730,7 +802,7 @@ const firebaseConfig = {
                     <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
                     </svg>
-                    Add New Attendance
+                    Clock In (Time In)
                 </button>
             </div>
 
@@ -816,15 +888,15 @@ const firebaseConfig = {
         </div>
     </div>
 
-    <!-- Add Attendance Modal -->
+    <!-- Add Attendance Modal (Time In Only) -->
     <div id="attendanceModal" class="hidden fixed inset-0 bg-black bg-opacity-50 modal-backdrop flex items-center justify-center z-50 p-4">
         <div class="glass-effect rounded-2xl shadow-2xl w-full max-w-md p-8 border-t-4 border-red-600">
             <div class="flex justify-between items-center mb-6">
                 <h2 class="text-2xl font-bold text-gray-800 flex items-center">
                     <svg class="w-7 h-7 mr-2 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    Add Attendance
+                    Clock In
                 </h2>
                 <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700 transition duration-200 hover:rotate-90 transform">
                     <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -851,33 +923,11 @@ const firebaseConfig = {
                         <svg class="w-5 h-5 mr-2 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
-                        Time In
+                        Time In (Auto-filled - Current Time)
                     </label>
-                    <div class="flex gap-2">
-                        <input type="time" id="timeIn" required
-                               class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition duration-200">
-                        <button type="button" onclick="setCurrentTime('timeIn')"
-                                class="gradient-yellow text-white px-6 py-3 rounded-xl transition duration-200 transform hover:scale-105 font-bold shadow-md">
-                            Now
-                        </button>
-                    </div>
-                </div>
-
-                <div class="mb-5">
-                    <label class="block text-gray-700 font-semibold mb-2 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Time Out
-                    </label>
-                    <div class="flex gap-2">
-                        <input type="time" id="timeOut" required
-                               class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent transition duration-200">
-                        <button type="button" onclick="setCurrentTime('timeOut')"
-                                class="gradient-yellow text-white px-6 py-3 rounded-xl transition duration-200 transform hover:scale-105 font-bold shadow-md">
-                            Now
-                        </button>
-                    </div>
+                    <input type="time" id="timeIn" required readonly
+                           class="w-full px-4 py-3 border-2 border-gray-300 bg-gray-100 rounded-xl cursor-not-allowed transition duration-200">
+                    <p class="text-xs text-gray-500 mt-1">⏰ Time is automatically set to current time</p>
                 </div>
 
                 <div class="mb-6">
@@ -900,7 +950,7 @@ const firebaseConfig = {
                         <svg class="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
                         </svg>
-                        Add Record
+                        Clock In
                     </button>
                     <button type="button" onclick="closeModal()"
                             class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-xl transition duration-200 shadow-lg flex items-center justify-center">
